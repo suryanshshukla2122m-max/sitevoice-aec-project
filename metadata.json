@@ -1,0 +1,6 @@
+{
+  "name": "SiteVoice AEC",
+  "description": "Voice-to-command project assistant for AEC workflows, enabling speech-driven snag logging, task management, and project queries.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
