@@ -54,6 +54,9 @@ function validateVoiceInterpretRequest(req, res, next) {
  * Middleware: Validates action execution request payload.
  */
 function validateActionExecuteRequest(req, res, next) {
+  if (req.body && req.body.action && typeof req.body.action === 'object') {
+    req.body = { ...req.body.action, ...req.body };
+  }
   const { actionType, projectId, payload } = req.body || {};
 
   const allowedActions = ['CREATE_SNAG', 'CREATE_TASK'];

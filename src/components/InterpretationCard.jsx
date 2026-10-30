@@ -22,19 +22,19 @@ export function InterpretationCard({ interpretation }) {
     switch (type) {
       case 'CREATE_SNAG':
         return {
-          label: 'Create Defect Snag',
+          label: 'Report Problem',
           icon: <AlertTriangle size={15} className="meta-icon warn" />,
           colorClass: 'intent-snag',
         };
       case 'CREATE_TASK':
         return {
-          label: 'Schedule Site Task',
+          label: 'Create Task',
           icon: <Calendar size={15} className="meta-icon info" />,
           colorClass: 'intent-task',
         };
       case 'SEARCH_SNAGS':
         return {
-          label: 'Search Snags',
+          label: 'Search Problems',
           icon: <Search size={15} className="meta-icon cyan" />,
           colorClass: 'intent-search',
         };
@@ -46,7 +46,7 @@ export function InterpretationCard({ interpretation }) {
         };
       case 'PROJECT_STATUS':
         return {
-          label: 'Project Status Audit',
+          label: 'Project Status',
           icon: <BarChart3 size={15} className="meta-icon green" />,
           colorClass: 'intent-status',
         };
@@ -73,7 +73,7 @@ export function InterpretationCard({ interpretation }) {
       <div className="interpretation-header">
         <div className="intent-title-row">
           <CheckCircle2 size={15} className="compass-icon" aria-hidden="true" />
-          <span className="intent-pretitle">UNDERSTOOD INSTRUCTION</span>
+          <span className="intent-pretitle">COMMAND UNDERSTANDING</span>
         </div>
         <div className="intent-action-badge">
           {meta.icon}
@@ -92,7 +92,7 @@ export function InterpretationCard({ interpretation }) {
         <div className="extracted-entities-grid">
           {pendingPayload.title && (
             <div className="entity-item">
-              <span className="entity-label">Title / Scope</span>
+              <span className="entity-label">Title</span>
               <span className="entity-value">{pendingPayload.title}</span>
             </div>
           )}
@@ -125,7 +125,7 @@ export function InterpretationCard({ interpretation }) {
           {pendingPayload.dueDate && (
             <div className="entity-item">
               <span className="entity-label">
-                <Calendar size={11} aria-hidden="true" /> Due Date
+                <Calendar size={11} aria-hidden="true" /> Deadline
               </span>
               <span className="entity-value">
                 {new Date(pendingPayload.dueDate).toLocaleDateString(undefined, {

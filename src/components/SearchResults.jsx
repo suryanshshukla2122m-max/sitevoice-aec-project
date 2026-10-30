@@ -1,12 +1,18 @@
 import React from 'react';
-import { X, MapPin, User, Calendar } from 'lucide-react';
+import { X, MapPin, User, Calendar, ArrowRight } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 
-export function SearchResults({ results = [], searchType, querySummary, onClear }) {
+export function SearchResults({ results = [], searchType, querySummary, onClear, onSelectResult }) {
   const isSnags = searchType === 'SEARCH_SNAGS';
-  const typeLabel = isSnags ? 'snag' : 'task';
+  const typeLabel = isSnags ? 'problem' : 'task';
   const count = results.length;
   const headline = `${count} ${count === 1 ? typeLabel : typeLabel + 's'} found`;
+
+  const handleClickItem = (item) => {
+    if (onSelectResult) {
+      onSelectResult(item, isSnags ? 'snags' : 'tasks');
+    }
+  };
 
   return (
     <div className="clean-search-results" role="region" aria-label="Search Results">
@@ -34,7 +40,15 @@ export function SearchResults({ results = [], searchType, querySummary, onClear 
       ) : (
         <div className="search-cards-stack">
           {results.map((item) => (
-            <div key={item._id} className="search-item-row">
+            <div
+              key={item._id}
+              className="search-item-row clickable"
+              onClick={() => handleClickItem(item)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && handleClickItem(item)}
+              title={`View ${item.title} in ${isSnags ? 'Problems' : 'Tasks'}`}
+            >
               <div className="search-item-main">
                 <span className="search-item-title">{item.title}</span>
                 <div className="search-item-details">
@@ -62,6 +76,9 @@ export function SearchResults({ results = [], searchType, querySummary, onClear 
               <div className="search-item-badges">
                 {item.priority && <StatusBadge status={item.priority} type="priority" />}
                 <StatusBadge status={item.status} type="status" />
+                <span className="search-navigate-hint">
+                  <ArrowRight size={13} />
+                </span>
               </div>
             </div>
           ))}
@@ -72,4 +89,3 @@ export function SearchResults({ results = [], searchType, querySummary, onClear 
 }
 
 export default SearchResults;
-

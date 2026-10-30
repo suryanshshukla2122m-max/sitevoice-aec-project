@@ -21,10 +21,33 @@ const projectSchema = new mongoose.Schema({
     required: [true, 'Project location is required'],
     trim: true,
   },
+  description: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   status: {
     type: String,
     enum: ['Active', 'On Hold', 'Completed'],
     default: 'Active',
+  },
+  managerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  budget: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  startDate: {
+    type: Date,
+    default: null,
+  },
+  targetDate: {
+    type: Date,
+    default: null,
   },
   createdAt: {
     type: Date,
@@ -33,3 +56,4 @@ const projectSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('Project', projectSchema);
+

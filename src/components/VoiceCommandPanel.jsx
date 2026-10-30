@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { Mic, MicOff, Send, Loader2, Check, AlertCircle } from 'lucide-react';
 
 const EXAMPLE_COMMANDS = [
-  'Create a snag for master bathroom ceiling',
-  'Schedule plumbing inspection for tomorrow',
-  'Show open snags',
-  'What is the status of the project?',
+  'Report a problem with cracked bathroom tile',
+  'Create a task to inspect electrical wiring',
+  'Show open problems',
+  'Show pending tasks',
+  'What is the project status?',
 ];
 
 export function VoiceCommandPanel({
@@ -44,7 +45,7 @@ export function VoiceCommandPanel({
     statusText = 'Processing…';
     statusColor = 'processing';
   } else if (hasPendingAction) {
-    statusText = 'Review confirmation';
+    statusText = 'Review details';
     statusColor = 'confirming';
   } else if (hasRecentSuccess) {
     statusText = 'Saved';
@@ -89,8 +90,8 @@ export function VoiceCommandPanel({
               isListening
                 ? interimTranscript || 'Listening... Speak your command'
                 : isInterpreting
-                ? 'Processing command with Gemini...'
-                : 'Tap mic to speak, or type a command (e.g. "Create snag for master bedroom door")'
+                ? 'Processing command...'
+                : 'Tap mic to speak, or type a command (e.g. Report a problem with bathroom tile)'
             }
             value={isListening ? interimTranscript : typedInput}
             onChange={(e) => !isListening && setTypedInput(e.target.value)}

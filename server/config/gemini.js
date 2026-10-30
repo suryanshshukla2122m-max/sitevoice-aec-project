@@ -2,8 +2,8 @@ const { GoogleGenAI } = require('@google/genai');
 
 let aiClient = null;
 
-const DEFAULT_PRIMARY_MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+const DEFAULT_PRIMARY_MODEL = 'gemini-3-flash-preview';
+const FALLBACK_MODELS = ['gemini-3.1-flash-lite'];
 
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -131,52 +131,48 @@ async function generateStructuredContent(prompt, systemInstruction, responseSche
   const config = {
     systemInstruction,
     responseMimeType: 'application/json',
+    temperature: 0.1,
   };
 
   if (responseSchema) {
     config.responseSchema = responseSchema;
   }
 
-  const MAX_RETRIES_PER_MODEL = 1; // 1 initial attempt + 1 retry per model
   let lastTransientError = null;
 
   for (let mIdx = 0; mIdx < modelChain.length; mIdx++) {
     const model = modelChain[mIdx];
     console.log(`[Gemini] Trying model: ${model}`);
 
-    for (let attempt = 1; attempt <= MAX_RETRIES_PER_MODEL + 1; attempt++) {
-      try {
-        const response = await client.models.generateContent({
+    try {
+      // 5-second timeout per model attempt to prevent hanging requests
+      const response = await Promise.race([
+        client.models.generateContent({
           model,
           contents: prompt,
           config,
-        });
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout invoking model ${model}`)), 5000)
+        ),
+      ]);
 
-        if (!response || !response.text) {
-          throw new Error('Gemini API returned an empty response.');
-        }
+      if (!response || !response.text) {
+        throw new Error('Gemini API returned an empty response.');
+      }
 
-        console.log(`[Gemini] Success with model: ${model}`);
-        return JSON.parse(response.text);
-      } catch (err) {
-        // If not a transient availability error, fail fast without masking
-        if (!isTransientUnavailableError(err)) {
-          throw err;
-        }
+      console.log(`[Gemini] Success with model: ${model}`);
+      return JSON.parse(response.text);
+    } catch (err) {
+      if (!isTransientUnavailableError(err) && !err.message.includes('Timeout')) {
+        throw err;
+      }
 
-        lastTransientError = err;
-
-        if (attempt <= MAX_RETRIES_PER_MODEL) {
-          console.warn('[Gemini] 503 received, retrying...');
-          const delayMs = 600 * attempt;
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        } else {
-          // Model exhausted after retries
-          if (mIdx + 1 < modelChain.length) {
-            const nextModel = modelChain[mIdx + 1];
-            console.warn(`[Gemini] Falling back to model: ${nextModel}`);
-          }
-        }
+      lastTransientError = err;
+      console.warn(`[Gemini] ${model} unavailable or timed out: ${err.message}.`);
+      if (mIdx + 1 < modelChain.length) {
+        const nextModel = modelChain[mIdx + 1];
+        console.warn(`[Gemini] Immediately falling back to model: ${nextModel}`);
       }
     }
   }

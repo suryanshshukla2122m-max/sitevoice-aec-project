@@ -10,52 +10,104 @@ import SnagList from './components/SnagList';
 import TaskList from './components/TaskList';
 import ProjectStatusView from './components/ProjectStatusView';
 import SearchResults from './components/SearchResults';
+import CreateSnagModal from './components/CreateSnagModal';
+import CreateTaskModal from './components/CreateTaskModal';
+import DeleteConfirmModal from './components/DeleteConfirmModal';
+import LoginModal from './components/LoginModal';
+import MyWorkView from './components/MyWorkView';
+import ReportedProblemsView from './components/ReportedProblemsView';
+import UserProfileView from './components/UserProfileView';
+import ProjectManagementView from './components/ProjectManagementView';
+import TeamManagementView from './components/TeamManagementView';
+
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import {
+  getCurrentUser,
+  loginUser,
+  switchUserSession,
+  logoutUser,
   getProjects,
   getProjectSummary,
+  createProject,
+  updateProject,
+  deleteProject,
   getSnags,
   getTasks,
+  getMyWork,
+  getUsers,
+  createUser,
+  updateUser,
+  createSnag,
+  createTask,
+  updateSnag,
+  deleteSnag,
+  updateTask,
+  addTaskUpdate,
+  deleteTask,
   interpretVoice,
   executeAction,
 } from './services/api';
 
 export default function App() {
-  // 1. Projects & Selected Context State
+  // 1. User Authentication & Role State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
+  // 2. Projects & Selected Context State
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectSummary, setProjectSummary] = useState(null);
   const [snags, setSnags] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [myWorkTasks, setMyWorkTasks] = useState([]);
+  const [users, setUsers] = useState([]);
 
-  // 2. Navigation State & Mobile Drawer
+  // 3. Navigation State & Filter Presets
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [snagInitialFilter, setSnagInitialFilter] = useState('ALL');
+  const [taskInitialFilter, setTaskInitialFilter] = useState('ALL');
+  const [snagExpandedId, setSnagExpandedId] = useState(null);
+  const [taskExpandedId, setTaskExpandedId] = useState(null);
 
-  // 3. Loading & UI States
+  // 4. Loading & UI States
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [isLoadingSnags, setIsLoadingSnags] = useState(false);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [isLoadingMyWork, setIsLoadingMyWork] = useState(false);
   const [isInterpreting, setIsInterpreting] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [hasRecentSuccess, setHasRecentSuccess] = useState(false);
 
-  // 4. Command Pipeline & Feedback States
+  // 5. Modal Dialog States
+  const [isCreateSnagOpen, setIsCreateSnagOpen] = useState(false);
+  const [snagModalInitialData, setSnagModalInitialData] = useState(null);
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    item: null,
+    type: null,
+    isDeleting: false,
+  });
+
+  // 6. Command Pipeline & Feedback States
   const [interpretation, setInterpretation] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
   const [assistantMessage, setAssistantMessage] = useState('');
 
-  // 5. Search Results State
+  // 7. Search Results State
   const [searchResults, setSearchResults] = useState(null);
   const [searchType, setSearchType] = useState(null);
   const [searchSummary, setSearchSummary] = useState('');
 
-  // 6. System Notifications
+  // 8. System Notifications
   const [notification, setNotification] = useState(null);
 
-  // 7. Speech Synthesis Hook (Audio playback)
+  // 9. Speech Synthesis Hook (Audio playback)
   const { speak, isSpeaking, isMuted, toggleMute } = useSpeechSynthesis();
 
   // Helper to show transient alerts
@@ -63,8 +115,13 @@ export default function App() {
     setNotification({ message, type, id: Date.now() });
   };
 
+  const isWorker =
+    currentUser &&
+    currentUser.role !== 'Admin' &&
+    currentUser.role !== 'Project Manager';
+
   // -------------------------------------------------------------
-  // Load Project Details (Summary, Snags, Tasks)
+  // Load Project Data (Summary, Snags, Tasks for selected project)
   // -------------------------------------------------------------
   const loadProjectData = useCallback(async (projectId) => {
     if (!projectId) return;
@@ -93,20 +150,67 @@ export default function App() {
   }, []);
 
   // -------------------------------------------------------------
-  // Initial Project Bootstrap
+  // Load My Work (For logged-in contractor/worker)
+  // -------------------------------------------------------------
+  const loadMyWorkData = useCallback(async (userId = null) => {
+    setIsLoadingMyWork(true);
+    try {
+      const params = {};
+      if (userId) params.assigneeId = userId;
+      const res = await getMyWork(params);
+      if (res.success) {
+        setMyWorkTasks(res.data || []);
+      }
+    } catch (err) {
+      console.warn('Could not load assigned work:', err);
+    } finally {
+      setIsLoadingMyWork(false);
+    }
+  }, []);
+
+  // -------------------------------------------------------------
+  // Initial Bootstrap: Auth Session, Projects, Users
   // -------------------------------------------------------------
   useEffect(() => {
-    async function initProjects() {
+    async function initApp() {
       setIsLoadingProjects(true);
       try {
-        const res = await getProjects();
-        if (res.success && res.data && res.data.length > 0) {
-          setProjects(res.data);
-          const defaultProj = res.data.find((p) => p.status === 'Active') || res.data[0];
+        // 1. Fetch current authenticated user
+        let user = null;
+        const authRes = await getCurrentUser().catch(() => ({ success: false }));
+        if (authRes.success && authRes.user) {
+          user = authRes.user;
+          setCurrentUser(user);
+        } else {
+          setCurrentUser(null);
+          setIsLoginModalOpen(true);
+        }
+
+        // 2. Fetch projects and users list
+        const [projRes, userRes] = await Promise.all([
+          getProjects(),
+          getUsers().catch(() => ({ success: false, data: [] })),
+        ]);
+
+        if (userRes.success && userRes.data) {
+          setUsers(userRes.data);
+        }
+
+        if (projRes.success && projRes.data && projRes.data.length > 0) {
+          setProjects(projRes.data);
+          const defaultProj = projRes.data.find((p) => p.status === 'Active') || projRes.data[0];
           setSelectedProject(defaultProj);
           await loadProjectData(defaultProj._id);
         } else {
           notify('No projects found. Please ensure project data is initialized.', 'error');
+        }
+
+        // If logged-in user is a contractor/worker, load their work & default to 'mywork' tab
+        if (user && user.role !== 'Admin' && user.role !== 'Project Manager') {
+          setActiveTab('mywork');
+          await loadMyWorkData(user._id);
+        } else {
+          setActiveTab('overview');
         }
       } catch (err) {
         notify(`Failed to connect to backend: ${err.message}`, 'error');
@@ -114,10 +218,13 @@ export default function App() {
         setIsLoadingProjects(false);
       }
     }
-    initProjects();
-  }, [loadProjectData]);
 
+    initApp();
+  }, [loadProjectData, loadMyWorkData]);
+
+  // -------------------------------------------------------------
   // Handle Project Change
+  // -------------------------------------------------------------
   const handleSelectProject = async (project) => {
     setSelectedProject(project);
     setSearchResults(null);
@@ -126,7 +233,226 @@ export default function App() {
     setInterpretation(null);
     setAssistantMessage('');
     await loadProjectData(project._id);
-    notify(`Active project: ${project.name}`, 'info');
+    notify(`Switched active project to ${project.name}`, 'info');
+  };
+
+  // -------------------------------------------------------------
+  // Auth Handlers (Login, Quick Switch, Logout)
+  // -------------------------------------------------------------
+  const handleLogin = async ({ email, password }) => {
+    setIsAuthLoading(true);
+    try {
+      const res = await loginUser({ email, password });
+      if (res.success && res.user) {
+        setCurrentUser(res.user);
+        notify(res.message || `Logged in as ${res.user.name}`, 'success');
+
+        // Reload projects accessible by this user
+        const projRes = await getProjects();
+        if (projRes.success && projRes.data) {
+          setProjects(projRes.data);
+          if (projRes.data.length > 0) {
+            setSelectedProject(projRes.data[0]);
+            await loadProjectData(projRes.data[0]._id);
+          }
+        }
+
+        // Set role default view
+        if (res.user.role !== 'Admin' && res.user.role !== 'Project Manager') {
+          setActiveTab('mywork');
+          await loadMyWorkData(res.user._id);
+        } else {
+          setActiveTab('overview');
+        }
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleQuickSwitch = async (account) => {
+    setIsAuthLoading(true);
+    try {
+      const res = await switchUserSession({ email: account.email });
+      if (res.success && res.user) {
+        setCurrentUser(res.user);
+        notify(`Switched session to ${res.user.name} (${res.user.role})`, 'success');
+
+        // Reload projects
+        const projRes = await getProjects();
+        if (projRes.success && projRes.data) {
+          setProjects(projRes.data);
+          if (projRes.data.length > 0) {
+            const currentProjStillAccessible = projRes.data.find(
+              (p) => p._id === selectedProject?._id
+            );
+            const activeP = currentProjStillAccessible || projRes.data[0];
+            setSelectedProject(activeP);
+            await loadProjectData(activeP._id);
+          }
+        }
+
+        // Set role-based tab
+        if (res.user.role !== 'Admin' && res.user.role !== 'Project Manager') {
+          setActiveTab('mywork');
+          await loadMyWorkData(res.user._id);
+        } else {
+          setActiveTab('overview');
+        }
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setCurrentUser(null);
+    notify('Signed out successfully.', 'info');
+    setIsLoginModalOpen(true);
+  };
+
+  // -------------------------------------------------------------
+  // Project Management Actions (Admin / PM)
+  // -------------------------------------------------------------
+  const handleCreateProject = async (formData) => {
+    try {
+      const res = await createProject(formData);
+      if (res.success && res.data) {
+        notify(`Created project "${res.data.name}"`, 'success');
+        const projRes = await getProjects();
+        if (projRes.success) {
+          setProjects(projRes.data);
+          setSelectedProject(res.data);
+          await loadProjectData(res.data._id);
+        }
+      }
+    } catch (err) {
+      notify(`Failed to create project: ${err.message}`, 'error');
+    }
+  };
+
+  const handleUpdateProject = async (id, formData) => {
+    try {
+      const res = await updateProject(id, formData);
+      if (res.success) {
+        notify('Project details updated successfully.', 'success');
+        const projRes = await getProjects();
+        if (projRes.success) {
+          setProjects(projRes.data);
+          if (selectedProject?._id === id) {
+            setSelectedProject(res.data);
+          }
+        }
+      }
+    } catch (err) {
+      notify(`Failed to update project: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteProject = async (id) => {
+    try {
+      const res = await deleteProject(id);
+      if (res.success) {
+        notify('Project deleted successfully.', 'success');
+        const projRes = await getProjects();
+        if (projRes.success && projRes.data.length > 0) {
+          setProjects(projRes.data);
+          setSelectedProject(projRes.data[0]);
+          await loadProjectData(projRes.data[0]._id);
+        }
+      }
+    } catch (err) {
+      notify(`Failed to delete project: ${err.message}`, 'error');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Team Management Actions
+  // -------------------------------------------------------------
+  const handleCreateUser = async (formData) => {
+    try {
+      const res = await createUser(formData);
+      if (res.success) {
+        notify(`Added team member "${res.data.name}"`, 'success');
+        const userRes = await getUsers();
+        if (userRes.success) setUsers(userRes.data);
+      }
+    } catch (err) {
+      notify(`Failed to add user: ${err.message}`, 'error');
+    }
+  };
+
+  const handleUpdateUser = async (id, formData) => {
+    try {
+      const res = await updateUser(id, formData);
+      if (res.success) {
+        notify('User assignments updated.', 'success');
+        const userRes = await getUsers();
+        if (userRes.success) setUsers(userRes.data);
+      }
+    } catch (err) {
+      notify(`Failed to update user: ${err.message}`, 'error');
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Contractor / Worker "My Work" Actions
+  // -------------------------------------------------------------
+  const handleMyWorkStatusUpdate = async (taskId, newStatus) => {
+    try {
+      const res = await updateTask(taskId, { status: newStatus });
+      if (res.success) {
+        notify(`Task status updated to "${newStatus}"`, 'success');
+        await Promise.all([
+          loadMyWorkData(currentUser?._id),
+          loadProjectData(selectedProject?._id),
+        ]);
+      }
+    } catch (err) {
+      notify(`Failed to update status: ${err.message}`, 'error');
+    }
+  };
+
+  const handleMyWorkAddUpdate = async (taskId, text) => {
+    try {
+      const res = await addTaskUpdate(taskId, text);
+      if (res.success) {
+        notify('Progress update posted to task log.', 'success');
+        await Promise.all([
+          loadMyWorkData(currentUser?._id),
+          loadProjectData(selectedProject?._id),
+        ]);
+      }
+    } catch (err) {
+      notify(`Failed to post update: ${err.message}`, 'error');
+    }
+  };
+
+  const handleMyWorkReportProblem = (task) => {
+    setSnagModalInitialData({
+      title: `Problem on: ${task.title}`,
+      location: task.projectId?.name || selectedProject?.location || '',
+      priority: 'High',
+      assigneeId: currentUser?._id || '',
+      description: `Reported by ${currentUser?.name} during execution of task "${task.title}".`,
+    });
+    setIsCreateSnagOpen(true);
+  };
+
+  // -------------------------------------------------------------
+  // Navigation with Filter Drill-Down (Metrics & Search items)
+  // -------------------------------------------------------------
+  const handleNavigateWithFilter = (tab, filter = 'ALL', itemId = null) => {
+    if (tab === 'snags') {
+      setSnagInitialFilter(filter);
+      if (itemId) setSnagExpandedId(itemId);
+    } else if (tab === 'tasks') {
+      setTaskInitialFilter(filter);
+      if (itemId) setTaskExpandedId(itemId);
+    }
+    setActiveTab(tab);
+    setSearchResults(null);
   };
 
   // -------------------------------------------------------------
@@ -158,6 +484,7 @@ export default function App() {
         (response.requiresConfirmation
           ? 'Action staged for review. Please confirm to save.'
           : 'Command processed.');
+
       setAssistantMessage(spoken);
       speak(spoken);
 
@@ -189,18 +516,16 @@ export default function App() {
         }
       }
     } catch (err) {
-      const errMsg = err.message || 'Error communicating with backend voice interpreter.';
+      const errMsg = err.message || 'Error communicating with voice interpreter.';
       notify(errMsg, 'error');
-      setAssistantMessage(`Sorry, I encountered an issue: ${errMsg}`);
+      setAssistantMessage(`Issue processing command: ${errMsg}`);
       speak('Sorry, I encountered an issue processing that command.');
     } finally {
       setIsInterpreting(false);
     }
   };
 
-  // -------------------------------------------------------------
-  // Speech Recognition Hook Integration
-  // -------------------------------------------------------------
+  // Speech Recognition Hook
   const {
     isListening,
     interimTranscript,
@@ -218,7 +543,7 @@ export default function App() {
   });
 
   // -------------------------------------------------------------
-  // Confirmation Handlers (Write Actions)
+  // Confirmation Handlers (Voice Action Confirmation)
   // -------------------------------------------------------------
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
@@ -235,40 +560,31 @@ export default function App() {
         throw new Error(result.message || 'Database write failed.');
       }
 
-      const successFeedback =
-        result.message ||
-        result.spokenResponse ||
-        (pendingAction.actionType === 'CREATE_SNAG'
-          ? 'Snag created successfully.'
-          : 'Task scheduled successfully.');
+      const confirmMsg =
+        pendingAction.actionType === 'CREATE_SNAG'
+          ? `Problem "${result.data?.title || pendingAction.payload.title}" reported and saved.`
+          : `Task "${result.data?.title || pendingAction.payload.title}" created and assigned.`;
 
-      notify(successFeedback, 'success');
-      setAssistantMessage(successFeedback);
-      speak(successFeedback);
+      notify(confirmMsg, 'success');
+      setAssistantMessage(confirmMsg);
+      speak(confirmMsg);
 
-      setHasRecentSuccess(true);
-      setTimeout(() => setHasRecentSuccess(false), 3500);
-
-      // Clear pending state
       setPendingAction(null);
       setInterpretation(null);
+      setHasRecentSuccess(true);
+      setTimeout(() => setHasRecentSuccess(false), 5000);
 
-      // Switch to the relevant tab to show the newly created item
-      if (pendingAction.actionType === 'CREATE_SNAG') {
-        setActiveTab('snags');
-      } else if (pendingAction.actionType === 'CREATE_TASK') {
-        setActiveTab('tasks');
-      }
-
-      // Immediately refresh active project summary and registry data from MongoDB
-      if (selectedProject) {
-        await loadProjectData(selectedProject._id);
+      if (pendingAction.projectId) {
+        await Promise.all([
+          loadProjectData(pendingAction.projectId),
+          loadMyWorkData(currentUser?._id),
+        ]);
       }
     } catch (err) {
-      const failMsg = `Action could not be saved: ${err.message}`;
-      notify(failMsg, 'error');
-      setAssistantMessage(failMsg);
-      speak('Failed to save record.');
+      const errMsg = err.message || 'Failed to save action to database.';
+      notify(errMsg, 'error');
+      setAssistantMessage(`Save failed: ${errMsg}`);
+      speak('The database action could not be completed.');
     } finally {
       setIsExecuting(false);
     }
@@ -276,10 +592,150 @@ export default function App() {
 
   const handleCancelAction = () => {
     setPendingAction(null);
-    const cancelMsg = 'Action cancelled. No changes were saved.';
-    notify(cancelMsg, 'info');
-    setAssistantMessage(cancelMsg);
-    speak('Action cancelled.');
+    setInterpretation(null);
+    setAssistantMessage('Action cancelled. No changes were made to the project.');
+    notify('Action cancelled.', 'info');
+  };
+
+  // -------------------------------------------------------------
+  // Problem Creation & Status Updates
+  // -------------------------------------------------------------
+  const handleCreateSnagSubmit = async (formData) => {
+    if (!selectedProject?._id) {
+      notify('Please select an active project before reporting a problem.', 'error');
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    try {
+      const payload = {
+        projectId: selectedProject._id,
+        reporterId: currentUser?._id,
+        reporterName: currentUser?.name,
+        ...formData,
+      };
+
+      const res = await createSnag(payload);
+      if (res.success) {
+        notify('Problem reported successfully.', 'success');
+        setIsCreateSnagOpen(false);
+        setSnagModalInitialData(null);
+        await Promise.all([
+          loadProjectData(selectedProject._id),
+          loadMyWorkData(currentUser?._id),
+        ]);
+        setActiveTab('snags');
+      }
+    } catch (err) {
+      notify(`Failed to report problem: ${err.message}`, 'error');
+    } finally {
+      setIsSubmittingModal(false);
+    }
+  };
+
+  const handleUpdateSnagStatus = async (snagId, newStatus) => {
+    try {
+      const res = await updateSnag(snagId, { status: newStatus });
+      if (res.success) {
+        notify(`Problem marked as ${newStatus}`, 'success');
+        await loadProjectData(selectedProject?._id);
+      }
+    } catch (err) {
+      notify(`Failed to update problem status: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteSnag = (snag) => {
+    setDeleteModal({
+      isOpen: true,
+      item: snag,
+      type: 'snag',
+      isDeleting: false,
+    });
+  };
+
+  // -------------------------------------------------------------
+  // Task Creation & Status Updates
+  // -------------------------------------------------------------
+  const handleCreateTaskSubmit = async (formData) => {
+    if (!selectedProject?._id) {
+      notify('Please select an active project before creating a task.', 'error');
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    try {
+      const payload = {
+        projectId: selectedProject._id,
+        ...formData,
+      };
+
+      const res = await createTask(payload);
+      if (res.success) {
+        notify('Task created and assigned successfully.', 'success');
+        setIsCreateTaskOpen(false);
+        await Promise.all([
+          loadProjectData(selectedProject._id),
+          loadMyWorkData(currentUser?._id),
+        ]);
+        setActiveTab('tasks');
+      }
+    } catch (err) {
+      notify(`Failed to create task: ${err.message}`, 'error');
+    } finally {
+      setIsSubmittingModal(false);
+    }
+  };
+
+  const handleUpdateTaskStatus = async (taskId, newStatus) => {
+    try {
+      const res = await updateTask(taskId, { status: newStatus });
+      if (res.success) {
+        notify(`Task marked as ${newStatus}`, 'success');
+        await Promise.all([
+          loadProjectData(selectedProject?._id),
+          loadMyWorkData(currentUser?._id),
+        ]);
+      }
+    } catch (err) {
+      notify(`Failed to update task status: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteTask = (task) => {
+    setDeleteModal({
+      isOpen: true,
+      item: task,
+      type: 'task',
+      isDeleting: false,
+    });
+  };
+
+  // -------------------------------------------------------------
+  // Confirm Deletion Handler
+  // -------------------------------------------------------------
+  const handleConfirmDelete = async () => {
+    const { item, type } = deleteModal;
+    if (!item) return;
+
+    setDeleteModal((prev) => ({ ...prev, isDeleting: true }));
+    try {
+      if (type === 'snag') {
+        await deleteSnag(item._id);
+        notify('Problem deleted successfully.', 'success');
+      } else if (type === 'task') {
+        await deleteTask(item._id);
+        notify('Task deleted successfully.', 'success');
+      }
+      setDeleteModal({ isOpen: false, item: null, type: null, isDeleting: false });
+      await Promise.all([
+        loadProjectData(selectedProject?._id),
+        loadMyWorkData(currentUser?._id),
+      ]);
+    } catch (err) {
+      notify(`Failed to delete ${type}: ${err.message}`, 'error');
+      setDeleteModal((prev) => ({ ...prev, isDeleting: false }));
+    }
   };
 
   const handleClearSearch = () => {
@@ -288,35 +744,76 @@ export default function App() {
     setSearchSummary('');
   };
 
+  const handleSelectSearchResult = (item, type) => {
+    if (type === 'SEARCH_SNAGS') {
+      handleNavigateWithFilter('snags', 'ALL', item._id);
+    } else {
+      handleNavigateWithFilter('tasks', 'ALL', item._id);
+    }
+  };
+
+  const reportedProblemsCount = snags.filter((s) => {
+    if (!currentUser) return false;
+    return (
+      s.reporterId?._id === currentUser._id ||
+      s.reporterId === currentUser._id ||
+      s.assigneeId?._id === currentUser._id ||
+      s.assigneeId === currentUser._id ||
+      s.assigneeId?.name === currentUser.name ||
+      s.reporterName === currentUser.name
+    );
+  }).length;
+
   return (
     <div className="sitevoice-app-shell">
-      {/* 4. Desktop Sidebar Navigation */}
-      <Sidebar
+      {/* Top Header across the entire top of the application */}
+      <Header
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setSearchResults(null);
-        }}
-        snagCount={snags.length}
-        taskCount={tasks.length}
+        isMuted={isMuted}
+        onToggleMute={toggleMute}
+        onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
         selectedProject={selectedProject}
         projects={projects}
         onSelectProject={handleSelectProject}
-        isOpenMobile={isMobileMenuOpen}
-        onCloseMobile={() => setIsMobileMenuOpen(false)}
+        currentUser={currentUser}
+        onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        onNavigateToProfile={() => {
+          setActiveTab('profile');
+          setSearchResults(null);
+        }}
+        onNavigateToHome={() => {
+          setActiveTab(isWorker ? 'mywork' : 'overview');
+          setSearchResults(null);
+        }}
+        onLogout={handleLogout}
+        onOpenCreateSnag={() => {
+          setSnagModalInitialData(null);
+          setIsCreateSnagOpen(true);
+        }}
+        onOpenCreateTask={!isWorker ? () => setIsCreateTaskOpen(true) : null}
       />
 
-      {/* Main Content Area */}
-      <div className="sitevoice-main-content">
-        {/* 4. Clean Top Header: Page Title Only */}
-        <Header
+      {/* Main Body Area: Left Sidebar + Right Workspace Content */}
+      <div className="sitevoice-body-container">
+        {/* Primary Sidebar Navigation */}
+        <Sidebar
           activeTab={activeTab}
-          isMuted={isMuted}
-          onToggleMute={toggleMute}
-          onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            setSearchResults(null);
+          }}
+          snagCount={snags.filter((s) => s.status === 'Open').length}
+          taskCount={tasks.filter((t) => t.status === 'Pending').length}
+          myWorkCount={myWorkTasks.filter((t) => t.status !== 'Completed').length}
+          reportedProblemsCount={reportedProblemsCount}
+          projectCount={projects.length}
+          teamCount={users.length}
+          currentUser={currentUser}
+          isOpenMobile={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
 
-        {/* Workspace Body */}
+        {/* Main Content Area (Occupies all remaining screen width) */}
         <main className="sitevoice-workspace">
           {/* Notification Alert (transient banner) */}
           {notification && (
@@ -340,13 +837,27 @@ export default function App() {
               searchType={searchType}
               querySummary={searchSummary}
               onClear={handleClearSearch}
+              onSelectResult={handleSelectSearchResult}
             />
           ) : (
             <>
-              {/* If active tab is OVERVIEW: Compact Voice Bar + 4 Metrics + Recent Activity */}
+              {/* Active Tab: MY WORK (Contractor / Worker Panel) */}
+              {activeTab === 'mywork' && (
+                <div className="registry-tab-layout">
+                  <MyWorkView
+                    tasks={myWorkTasks}
+                    isLoading={isLoadingMyWork}
+                    currentUser={currentUser}
+                    onUpdateStatus={handleMyWorkStatusUpdate}
+                    onAddUpdate={handleMyWorkAddUpdate}
+                    onReportProblem={handleMyWorkReportProblem}
+                  />
+                </div>
+              )}
+
+              {/* Active Tab: OVERVIEW (Dashboard with voice bar & metrics) */}
               {activeTab === 'overview' && (
                 <div className="overview-page-layout">
-                  {/* 5, 6, 7. Compact Voice Command Bar + subtle helpers */}
                   <VoiceCommandPanel
                     isListening={isListening}
                     interimTranscript={interimTranscript}
@@ -360,7 +871,7 @@ export default function App() {
                     hasRecentSuccess={hasRecentSuccess}
                   />
 
-                  {/* Non-modal Voice Feedback (Assistant voice response or query interpretation) */}
+                  {/* Non-modal Voice Feedback */}
                   {!pendingAction && (interpretation || assistantMessage) && (
                     <div className="voice-inline-feedback">
                       {interpretation ? (
@@ -375,32 +886,118 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* 9, 10. Four Overview Metrics & Recent Activity */}
+                  {/* Four Overview Metrics & Recent Activity */}
                   <ProjectOverview
                     summary={projectSummary}
                     snags={snags}
                     tasks={tasks}
                     isLoading={isLoadingSummary}
-                    onNavigate={(tab) => setActiveTab(tab)}
+                    onNavigate={handleNavigateWithFilter}
+                    projectName={selectedProject?.name}
                   />
                 </div>
               )}
 
-              {/* Active Tab: SNAGS (Section 10) */}
+              {/* Active Tab: PROBLEMS I REPORTED (Worker / Contractor Panel) */}
+              {activeTab === 'reported_problems' && (
+                <div className="registry-tab-layout">
+                  <ReportedProblemsView
+                    snags={snags}
+                    currentUser={currentUser}
+                    selectedProject={selectedProject}
+                    isLoading={isLoadingSnags}
+                    onOpenReportProblem={() => {
+                      setSnagModalInitialData(null);
+                      setIsCreateSnagOpen(true);
+                    }}
+                    onUpdateStatus={handleUpdateSnagStatus}
+                  />
+                </div>
+              )}
+
+              {/* Active Tab: USER PROFILE */}
+              {activeTab === 'profile' && (
+                <div className="registry-tab-layout">
+                  <UserProfileView
+                    currentUser={currentUser}
+                    projects={projects}
+                    onOpenLoginModal={() => setIsLoginModalOpen(true)}
+                    onLogout={handleLogout}
+                  />
+                </div>
+              )}
+
+              {/* Active Tab: CONSTRUCTION PROJECTS (Multi-Project View) */}
+              {activeTab === 'projects' && (
+                <div className="registry-tab-layout">
+                  <ProjectManagementView
+                    projects={projects}
+                    isLoading={isLoadingProjects}
+                    currentUser={currentUser}
+                    selectedProject={selectedProject}
+                    onSelectProject={(p) => {
+                      handleSelectProject(p);
+                      setActiveTab('overview');
+                    }}
+                    onCreateProject={handleCreateProject}
+                    onUpdateProject={handleUpdateProject}
+                    onDeleteProject={handleDeleteProject}
+                    users={users}
+                  />
+                </div>
+              )}
+
+              {/* Active Tab: PROBLEMS (Snags) */}
               {activeTab === 'snags' && (
                 <div className="registry-tab-layout">
-                  <SnagList snags={snags} isLoading={isLoadingSnags} />
+                  <SnagList
+                    snags={snags}
+                    isLoading={isLoadingSnags}
+                    onOpenCreate={() => {
+                      setSnagModalInitialData(null);
+                      setIsCreateSnagOpen(true);
+                    }}
+                    onUpdateStatus={handleUpdateSnagStatus}
+                    onDeleteSnag={handleDeleteSnag}
+                    initialFilter={snagInitialFilter}
+                    initialExpandedId={snagExpandedId}
+                    projectName={selectedProject?.name}
+                  />
                 </div>
               )}
 
-              {/* Active Tab: TASKS (Section 11) */}
+              {/* Active Tab: TASKS */}
               {activeTab === 'tasks' && (
                 <div className="registry-tab-layout">
-                  <TaskList tasks={tasks} isLoading={isLoadingTasks} />
+                  <TaskList
+                    tasks={tasks}
+                    isLoading={isLoadingTasks}
+                    onOpenCreate={!isWorker ? () => setIsCreateTaskOpen(true) : null}
+                    onUpdateStatus={handleUpdateTaskStatus}
+                    onDeleteTask={handleDeleteTask}
+                    initialFilter={taskInitialFilter}
+                    initialExpandedId={taskExpandedId}
+                    projectName={selectedProject?.name}
+                    canDelete={!isWorker}
+                  />
                 </div>
               )}
 
-              {/* Active Tab: PROJECT STATUS (Section 12) */}
+              {/* Active Tab: TEAM & CONTRACTORS */}
+              {activeTab === 'team' && (
+                <div className="registry-tab-layout">
+                  <TeamManagementView
+                    users={users}
+                    projects={projects}
+                    tasks={tasks}
+                    currentUser={currentUser}
+                    onCreateUser={handleCreateUser}
+                    onUpdateUser={handleUpdateUser}
+                  />
+                </div>
+              )}
+
+              {/* Active Tab: PROJECT STATUS */}
               {activeTab === 'status' && (
                 <div className="registry-tab-layout">
                   <ProjectStatusView
@@ -417,7 +1014,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* 8. CREATE_SNAG / CREATE_TASK confirmation as an overlay/modal so it does not push the page downward */}
+      {/* Voice CREATE_SNAG / CREATE_TASK Confirmation Dialog */}
       {pendingAction && (
         <ConfirmationCard
           pendingAction={pendingAction}
@@ -428,6 +1025,52 @@ export default function App() {
           isExecuting={isExecuting}
         />
       )}
+
+      {/* Manual Report Problem Modal Form */}
+      <CreateSnagModal
+        isOpen={isCreateSnagOpen}
+        onClose={() => {
+          setIsCreateSnagOpen(false);
+          setSnagModalInitialData(null);
+        }}
+        onSubmit={handleCreateSnagSubmit}
+        users={users}
+        projectName={selectedProject?.name}
+        initialData={snagModalInitialData}
+        isSubmitting={isSubmittingModal}
+      />
+
+      {/* Manual Create Task Modal Form */}
+      <CreateTaskModal
+        isOpen={isCreateTaskOpen}
+        onClose={() => setIsCreateTaskOpen(false)}
+        onSubmit={handleCreateTaskSubmit}
+        users={users}
+        projectName={selectedProject?.name}
+        isSubmitting={isSubmittingModal}
+      />
+
+      {/* Deletion Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() =>
+          setDeleteModal({ isOpen: false, item: null, type: null, isDeleting: false })
+        }
+        onConfirm={handleConfirmDelete}
+        title={deleteModal.item?.title || ''}
+        itemType={deleteModal.type || 'item'}
+        isDeleting={deleteModal.isDeleting}
+      />
+
+      {/* User Login & Role Switcher Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        currentUser={currentUser}
+        onLogin={handleLogin}
+        onQuickSwitch={handleQuickSwitch}
+        isSubmitting={isAuthLoading}
+      />
     </div>
   );
 }

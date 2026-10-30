@@ -1,8 +1,10 @@
 import React, { useEffect } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, AlertTriangle, Calendar, User, MapPin } from 'lucide-react';
 
 export function ConfirmationCard({
   pendingAction,
+  projectName = 'Skyline Residence',
+  projectCode = 'SKY-204',
   onConfirm,
   onCancel,
   isExecuting,
@@ -23,8 +25,8 @@ export function ConfirmationCard({
   const { actionType, payload } = pendingAction;
   const isSnag = actionType === 'CREATE_SNAG';
 
-  const actionTitle = isSnag ? 'Confirm New Problem (Snag)' : 'Confirm New Work (Task)';
-  const submitButtonLabel = isSnag ? 'Confirm & Create Problem (Snag)' : 'Confirm & Create Work (Task)';
+  const actionTitle = isSnag ? 'Confirm Problem Report' : 'Confirm Task Creation';
+  const submitButtonLabel = isSnag ? 'Save Problem' : 'Save Task';
 
   const formattedDueDate = payload.dueDate
     ? new Date(payload.dueDate).toLocaleDateString(undefined, {
@@ -49,9 +51,14 @@ export function ConfirmationCard({
         aria-labelledby="confirm-title"
       >
         <div className="modal-header">
-          <h3 id="confirm-title" className="modal-header-title">
-            {actionTitle}
-          </h3>
+          <div>
+            <h3 id="confirm-title" className="modal-header-title">
+              Confirmation Window
+            </h3>
+            <p className="modal-subtitle">
+              {actionTitle} • Review details before saving
+            </p>
+          </div>
           <button
             type="button"
             className="modal-close-btn"
@@ -64,33 +71,52 @@ export function ConfirmationCard({
         </div>
 
         <div className="modal-body">
+          <div className="confirm-item-badge">
+            <span className={`badge-pill ${isSnag ? 'snag-pill' : 'task-pill'}`}>
+              {isSnag ? 'PROBLEM REPORT' : 'SCHEDULED TASK'}
+            </span>
+            <span className="project-context-pill">{projectName} ({projectCode})</span>
+          </div>
+
           <div className="confirm-item-title">{payload.title}</div>
 
           <div className="confirm-specs-list">
             {isSnag && payload.location && (
               <div className="confirm-spec-row">
-                <span className="spec-name">Location:</span>
+                <span className="spec-name">
+                  <MapPin size={13} />
+                  <span>Location:</span>
+                </span>
                 <span className="spec-val">{payload.location}</span>
               </div>
             )}
 
             {isSnag && payload.priority && (
               <div className="confirm-spec-row">
-                <span className="spec-name">Priority:</span>
+                <span className="spec-name">
+                  <AlertTriangle size={13} />
+                  <span>Priority:</span>
+                </span>
                 <span className="spec-val highlight-priority">{payload.priority}</span>
               </div>
             )}
 
             {payload.assigneeName && (
               <div className="confirm-spec-row">
-                <span className="spec-name">Assigned to:</span>
+                <span className="spec-name">
+                  <User size={13} />
+                  <span>Assigned To:</span>
+                </span>
                 <span className="spec-val">{payload.assigneeName}</span>
               </div>
             )}
 
             {!isSnag && formattedDueDate && (
               <div className="confirm-spec-row">
-                <span className="spec-name">Due date:</span>
+                <span className="spec-name">
+                  <Calendar size={13} />
+                  <span>Deadline:</span>
+                </span>
                 <span className="spec-val highlight-date">{formattedDueDate}</span>
               </div>
             )}
@@ -115,7 +141,7 @@ export function ConfirmationCard({
             {isExecuting ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
-                <span>Saving…</span>
+                <span>Saving changes…</span>
               </>
             ) : (
               submitButtonLabel

@@ -8,11 +8,13 @@ const { connectDB } = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
 
 // Route imports
+const authRoutes = require('./routes/authRoutes');
 const voiceRoutes = require('./routes/voiceRoutes');
 const actionRoutes = require('./routes/actionRoutes');
 const projectRoutes = require('./routes/projectRoutes');
 const snagRoutes = require('./routes/snagRoutes');
 const taskRoutes = require('./routes/taskRoutes');
+const { authenticate } = require('./middleware/auth');
 
 async function startServer() {
   const app = express();
@@ -54,6 +56,7 @@ async function startServer() {
 
   // Middleware
   app.use(express.json());
+  app.use(authenticate);
 
   // Health check
   app.get('/api/health', (req, res) => {
@@ -69,11 +72,23 @@ async function startServer() {
   });
 
   // API Routes
+  app.use('/api/auth', authRoutes);
   app.use('/api/voice', voiceRoutes);
   app.use('/api/actions', actionRoutes);
   app.use('/api/projects', projectRoutes);
   app.use('/api/snags', snagRoutes);
   app.use('/api/tasks', taskRoutes);
+
+  // Users / Contractors directory endpoint for form selection
+  app.get('/api/users', async (req, res, next) => {
+    try {
+      const User = require('./models/User');
+      const users = await User.find({}).select('name role email phone').sort({ name: 1 }).lean();
+      res.json({ success: true, count: users.length, data: users });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // Centralized API endpoint directory
   app.get(['/api', '/api/endpoints'], (req, res) => {

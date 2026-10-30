@@ -25,11 +25,29 @@ const taskSchema = new mongoose.Schema({
     enum: ['Pending', 'In Progress', 'Completed'],
     default: 'Pending',
   },
+  priority: {
+    type: String,
+    enum: ['Low', 'Medium', 'High', 'Critical'],
+    default: 'Medium',
+  },
   assigneeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: [true, 'Assignee reference (assigneeId) is required'],
   },
+  instructions: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  updates: [
+    {
+      text: { type: String, required: true },
+      authorName: { type: String, default: 'Team Member' },
+      authorRole: { type: String, default: 'Contractor' },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
   createdAt: {
     type: Date,
     default: Date.now,
@@ -37,3 +55,4 @@ const taskSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('Task', taskSchema);
+

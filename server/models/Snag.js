@@ -36,6 +36,16 @@ const snagSchema = new mongoose.Schema({
     ref: 'User',
     required: [true, 'Assignee reference (assigneeId) is required'],
   },
+  reporterId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  reporterName: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

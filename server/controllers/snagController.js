@@ -65,8 +65,15 @@ async function getSnags(req, res, next) {
       filter.title = new RegExp(safeSearch, 'i');
     }
 
+    // If non-admin and no explicit projectId requested, scope to assigned projects
+    if (!filter.projectId && req.user && req.user.role !== 'Admin') {
+      const assigned = Array.isArray(req.user.assignedProjects) ? req.user.assignedProjects : [];
+      filter.projectId = { $in: assigned };
+    }
+
     const snags = await Snag.find(filter)
       .populate('assigneeId', 'name role')
+      .populate('reporterId', 'name role email')
       .populate('projectId', 'name')
       .sort({ createdAt: -1 })
       .lean();
@@ -87,7 +94,16 @@ async function getSnags(req, res, next) {
  */
 async function createSnag(req, res, next) {
   try {
-    const { projectId, title, location, priority = 'Medium', assigneeId, description = '' } = req.body;
+    const {
+      projectId,
+      title,
+      location,
+      priority = 'Medium',
+      assigneeId,
+      description = '',
+      reporterId: explicitReporterId,
+      reporterName: explicitReporterName,
+    } = req.body;
 
     const { getActiveProject } = require('../services/projectService');
     const project = await getActiveProject(projectId);
@@ -107,18 +123,25 @@ async function createSnag(req, res, next) {
     const allowedPriorities = ['Low', 'Medium', 'High', 'Critical'];
     const validPriority = allowedPriorities.includes(priority) ? priority : 'Medium';
 
+    const reporterId = req.user ? req.user._id : (isValidObjectId(explicitReporterId) ? explicitReporterId : null);
+    const reporterName = req.user ? req.user.name : (explicitReporterName || '');
+
     const snag = await Snag.create({
       projectId: project._id,
       title: title.trim(),
       location: location.trim(),
       priority: validPriority,
       assigneeId: assignee._id,
+      reporterId,
+      reporterName,
       description: description.trim(),
       status: 'Open',
     });
 
     const populated = await Snag.findById(snag._id)
       .populate('assigneeId', 'name role')
+      .populate('reporterId', 'name role email')
+      .populate('projectId', 'name')
       .lean();
 
     return res.status(201).json({
@@ -130,7 +153,101 @@ async function createSnag(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/snags/:id
+ * Updates snag status or attributes in MongoDB.
+ */
+async function updateSnag(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid snag ID format.' });
+    }
+
+    const updates = {};
+    const { status, priority, title, location, assigneeId, description } = req.body;
+
+    if (status !== undefined) {
+      const allowed = ['Open', 'In Progress', 'Resolved', 'Closed'];
+      const matched = allowed.find((s) => s.toLowerCase() === String(status).trim().toLowerCase());
+      if (!matched) {
+        return res.status(400).json({ success: false, message: `Invalid status "${status}". Allowed: ${allowed.join(', ')}` });
+      }
+      updates.status = matched;
+    }
+
+    if (priority !== undefined) {
+      const allowed = ['Low', 'Medium', 'High', 'Critical'];
+      const matched = allowed.find((p) => p.toLowerCase() === String(priority).trim().toLowerCase());
+      if (!matched) {
+        return res.status(400).json({ success: false, message: `Invalid priority "${priority}". Allowed: ${allowed.join(', ')}` });
+      }
+      updates.priority = matched;
+    }
+
+    if (title !== undefined && typeof title === 'string' && title.trim()) updates.title = title.trim();
+    if (location !== undefined && typeof location === 'string') updates.location = location.trim();
+    if (description !== undefined && typeof description === 'string') updates.description = description.trim();
+    if (assigneeId !== undefined) {
+      if (!isValidObjectId(assigneeId)) {
+        return res.status(400).json({ success: false, message: 'Invalid assigneeId.' });
+      }
+      updates.assigneeId = assigneeId;
+    }
+
+    const updated = await Snag.findByIdAndUpdate(id, { $set: updates }, { new: true })
+      .populate('assigneeId', 'name role')
+      .populate('projectId', 'name')
+      .lean();
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Snag not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Snag updated successfully.',
+      data: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/snags/:id
+ */
+async function deleteSnag(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid snag ID format.' });
+    }
+
+    if (req.user && req.user.role !== 'Admin' && req.user.role !== 'Project Manager') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Only Admins and Project Managers can remove problems.',
+      });
+    }
+
+    const deleted = await Snag.findByIdAndDelete(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Snag not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Snag deleted successfully.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getSnags,
   createSnag,
+  updateSnag,
+  deleteSnag,
 };
